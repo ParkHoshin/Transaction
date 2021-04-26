@@ -31,9 +31,52 @@
                  read-only : 읽기 전용 여부를 설정.
     </tx:attributes>
 	</tx:advice>
-2.어노테이션을 이용한 설정(SSBI)
-@Transcational
+2.어노테이션을 이용한 설정(JavaConfig방식으로 설정)(SSBI)
+-DataBaseConfig.java 예시
+	@Configuration
+	@PropertySource("classpath:/jdbc-${spring.profiles.active}.properties") -------------->설정파일 불러오기
+	@MapperScan(basePackages = {"com.ecs.**.dao.**"})
 
+	public class DatabaseConfig {
+		@Bean
+		public PlatformTransactionManager dataSourceTransaction(DataSource dataSource) { --------------------->가장 중요~! PlatformTransactionManager를 만들어준다.
+			return new DataSourceTransactionManager(dataSource); 
+		}
+	
+	}
+-makingserviceimpl.java 예시	
 
-SSBI
-@Transactional(value="dataSourceTransaction", propagation=Propagation.REQUIRED, rollbackFor=Exception.class)
+	@Transactional(value="dataSourceTransaction", propagation=Propagation.REQUIRED, rollbackFor=Exception.class)   ------> 트랜잭션 처리 할 메서드에 어노테이션 추가하면 끝!
+	
+3.AOP를 이용한 트랜잭션(SSBI)
+
+	TransactionInterceptor : 
+	
+	@Bean
+	public TransactionInterceptor transactionAdvice(PlatformTransactionManager txManager) {
+		NameMatchTransactionAttributeSource txAttributeSource = new NameMatchTransactionAttributeSource(); --------> 등록된 이름으로 속성을 일치시킨다.
+		
+		RuleBasedTransactionAttribute txAttribute = new RuleBasedTransactionAttribute();----------> 만들어진 변수에 어떠한 상황에 어떻게 트랜잭션을 작동할지 정한다. 
+		txAttribute.setRollbackRules(Collections.singletonList(new RollbackRuleAttribute(Exception.class)));------->1개의 객체만 있는 리스트를 반환
+		txAttribute.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
+		txAttribute.setReadOnly(false);
+		
+		HashMap<String, TransactionAttribute> txMethods = new HashMap<String, TransactionAttribute>();
+		txMethods.put("select*", txAttribute);
+		txMethods.put("get*", txAttribute);
+		
+		txMethods.put("insert*", txAttribute);
+		txMethods.put("update*", txAttribute);
+		txMethods.put("delete*", txAttribute);
+		txMethods.put("save*", txAttribute);
+		txAttributeSource.setNameMap(txMethods);
+
+		return new TransactionInterceptor(txManager, txAttributeSource);
+	}
+
+	@Bean
+	public Advisor transactionAdviceAdvisor() {
+		AspectJExpressionPointcut pointcut = new AspectJExpressionPointcut();
+		pointcut.setExpression("within(@org.springframework.stereotype.Service *)");
+		return new DefaultPointcutAdvisor(pointcut, transactionAdvice(dataSourceTransaction(dataSource())));
+	}
